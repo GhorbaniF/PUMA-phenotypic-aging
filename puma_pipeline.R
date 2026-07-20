@@ -48,7 +48,6 @@ ncol(df_filtered)
 
 ##### Handle missing values
 df <- df_filtered
-df[is.na(df)] <- 0
 
 #########Remove Columns with Constant or Zero Variance (Keep only columns with non-zero variance)
 cols_with_variance <- sapply(df, sd) > 0
