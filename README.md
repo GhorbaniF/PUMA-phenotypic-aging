@@ -38,6 +38,18 @@ cd PUMA-phenotypic-aging
 ```
 Install the required R packages before running the pipeline.
 
+## Required R packages
+The pipeline requires the following R packages:
+- dplyr
+- fgsea
+- ggplot2
+- gridExtra
+- ppcor
+- readxl
+- reshape2
+- viridis
+
+
 ## Usage
 The `pipeline/` directory contains the R implementation of the complete PUMA workflow. The pipeline was developed and tested using **R 4.2.1**.
 Before running the pipeline:
