@@ -24,9 +24,11 @@ flowchart TD
 - Association analyses between phenotypic dimensions and incident age-related diseases.
 
 ## Structure
+```text
 PUMA-phenotypic-aging/
-├── pipeline/    # R scripts implementing the complete PUMA workflow, from data preprocessing to disease association analyses.
+├── pipeline/    # R scripts implementing the complete PUMA workflow
 └── README.md
+```
 
 ## Installation
 Clone this repository:
