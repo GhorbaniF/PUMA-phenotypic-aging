@@ -1,1 +1,55 @@
+####################################################################################################################
+####################Section1:pre-processing data#####################################################################
+##################################################################################################################
 
+###Define File Name and Path
+file_name = "1a"
+file_path = paste(file_name, ".csv", sep = "")
+
+###Read the data
+df_org <- read.csv(file_path, stringsAsFactors=FALSE)
+
+#####Exclude specific columns
+exclude_cols <- c("project_pseudo_id", "variant_id", "date","gender","zip_code")
+df_exc <- df_org[, !(colnames(df_org) %in% exclude_cols)]
+
+####Replace $X with NA
+df_exc[] <- lapply(df_exc, function(x) gsub("\\$4", NA, x))
+df_exc[] <- lapply(df_exc, function(x) gsub("\\$5", NA, x))
+df_exc[] <- lapply(df_exc, function(x) gsub("\\$6", NA, x))
+df_exc[] <- lapply(df_exc, function(x) gsub("\\$7", NA, x))
+
+#######calculate the proportion of missing values in each column
+missing_proportion <- colMeans(is.na(df_exc))
+
+####Create a bar plot of missing values
+p <- ggplot(data.frame(variable = names(missing_proportion), missing_proportion = missing_proportion), 
+            aes(x = variable, y = missing_proportion, fill = missing_proportion)) +
+  geom_bar(stat = "identity") +
+  scale_y_continuous(limits = c(0, 1))+
+  scale_color_gradient(limits = c(0, 1))+
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))+
+  ggtitle("Proportion of Missing Values in Each Column") +
+  xlab("Variable") + ylab("Proportion of Missing Values")
+ggsave(filename = "1a_proportion_of_missing_values_files.pdf", plot = p, width = 45, height = 6)
+
+############## Keep Columns with Less than 75% Missing Values
+df_filtered <- df_exc[, which(missing_proportion < 0.75)]
+
+
+########## Exclude Character Columns
+df_filtered <- type.convert(df_filtered, as.is=TRUE)
+df_filtered <- df_filtered %>% select_if(function(x) !is.character(x))
+
+
+####Check Number of Remaining Variables after filtering (NOTE:  in file 1a, after filtering 1180 variables remained)
+ncol(df_filtered)
+
+
+##### Handle missing values
+df <- df_filtered
+
+#########Remove Columns with Constant or Zero Variance (Keep only columns with non-zero variance)
+cols_with_variance <- sapply(df, sd) > 0
+cols_without_na <- !is.na(cols_with_variance) & cols_with_variance
+df_clean <- df[, cols_without_na]
