@@ -60,7 +60,7 @@ Run the pipeline with:
 ```bash
 Rscript puma_pipeline.R
 ```
-## Data availibilty
+## Data availability
 The Lifelines cohort data used in this study are not publicly available due to participant privacy and data-sharing restrictions.
 Researchers interested in accessing the data should apply directly through the Lifelines study (https://www.lifelines.nl).
 
