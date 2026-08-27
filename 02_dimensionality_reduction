@@ -102,3 +102,57 @@ for (i in 1:top_n_pca) {
   } 
 } 
 
+#######################################PC score vs age + plot######################################
+##add age to the PCA scores
+df_clean <- read.csv("df_1a_clean.csv")
+df.pca.scores <- pca_scores
+df.pca.scores$age <- df_clean$age
+
+# Create age groups
+df.pca.scores$age_group <- cut(df.pca.scores$age, breaks = seq(0, 100, 10))
+
+#Calculate Statistics by Age Group
+#Calculate the average PC scores for each age group
+df.pca.scores.grouped.mean <- df.pca.scores %>% 
+  group_by(age_group) %>% 
+  summarize_all(suppressWarnings(funs(mean(., na.rm = TRUE))))
+
+# Calculate the standard deviation of PC scores for each age group
+df.pca.scores.grouped.sd <- df.pca.scores %>% 
+  group_by(age_group) %>% 
+  summarize_all(suppressWarnings(funs(sd(., na.rm = TRUE))))
+
+# Plot the mean and standard deviation of the PC scores in each age group
+colors <- c("red", "gold","chartreuse3","cyan","blue", "pink", "magenta",   "black",  "darkblue", "darkred", "darkgreen", "yellow")
+
+#List of PCA component names to iterate over
+pca_components <- paste0("V", 1:top_n_pca)
+
+p <- ggplot()
+
+# Loop over the PCA components
+for (i in 1:top_n_pca) {
+  
+  # Extract the current PCA component
+  pca_component <- pca_components[i]
+  
+  
+  # Create a new plot for the current PCA component
+  p <- p + geom_line(data = df.pca.scores.grouped.mean, aes(x = age_group, y = !!sym(pca_component), group = i), color = colors[i], linewidth = 1.5, show.legend = TRUE) 
+}
+
+
+# Finalize the plot with labels, title, and color scale
+p <- p + labs(x = "Age Group", y = "PCA Scores") +
+  scale_color_manual(values = colors[1:2]) +
+  theme(legend.position = "right",
+        axis.text = element_text(size = 14),
+        axis.title = element_text(size = 16),
+        plot.title = element_text(size = 18, hjust = 0.5)) +
+  ggtitle("PCA Scores by Age Group")
+filename <- paste0("pca_scores_vs_ages3.pdf")
+ggsave(filename = filename, plot = p, width = 15, height = 12)
+####This plot shows PC score vs age for the flipped PC scores and will be in the paper
+
+
+
