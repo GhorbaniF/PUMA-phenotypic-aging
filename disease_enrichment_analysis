@@ -1,0 +1,584 @@
+################################################################################
+# Section 5: Disease enrichment analysis
+################################################################################
+
+library(dplyr)
+library(ggplot2)
+library(fgsea)
+
+
+################################################################################
+# 5.1 Analysis settings
+################################################################################
+
+# PUMA dimensions
+n_pcs <- 7
+
+# Number of permutations used for enrichment analysis
+n_permutations <- 100000
+
+# Number of bins used to examine disease distribution across ranked scores
+n_bins <- 50
+
+# Significance threshold
+significance_threshold <- 0.05
+
+
+################################################################################
+# 5.2 Disease enrichment function
+################################################################################
+
+# This function tests whether participants who develop a given disease are
+# enriched toward either end of the ranked PUMA composite-score distribution.
+
+run_disease_enrichment <- function(
+  data,
+  disease,
+  pc,
+  score_type,
+  output_folder
+) {
+
+  message(
+    "Disease: ", disease,
+    " | PC", pc,
+    " | score type: ", score_type
+  )
+
+
+  ##############################################################################
+  # Rank participants by composite score
+  ##############################################################################
+
+  ranked_data <- data %>%
+    mutate(
+      project_pseudo_id = as.character(
+        project_pseudo_id
+      )
+    ) %>%
+    arrange(
+      desc(composite_score)
+    )
+
+
+  # Create ranked score vector
+  ranked_scores <- ranked_data$composite_score
+
+  names(ranked_scores) <- ranked_data$project_pseudo_id
+
+
+  ##############################################################################
+  # Define disease cases
+  ##############################################################################
+
+  disease_cases <- ranked_data %>%
+    filter(
+      disease_development == 1
+    ) %>%
+    pull(
+      project_pseudo_id
+    )
+
+
+  disease_set <- list(
+    disease_cases = disease_cases
+  )
+
+
+  ##############################################################################
+  # Run enrichment analysis
+  ##############################################################################
+
+  enrichment_result <- fgsea(
+    pathways = disease_set,
+    stats = ranked_scores,
+    minSize = 10,
+    maxSize = 10000,
+    nproc = 1,
+    nperm = n_permutations,
+    scoreType = score_type
+  )
+
+
+  enrichment_result <- as.data.frame(
+    enrichment_result
+  )
+
+
+  # Add analysis information
+  enrichment_result$disease <- disease
+  enrichment_result$PC <- pc
+  enrichment_result$score_type <- score_type
+
+
+  ##############################################################################
+  # Save enrichment statistics
+  ##############################################################################
+
+  write.csv(
+    enrichment_result,
+    file = file.path(
+      output_folder,
+      paste0(
+        disease,
+        "_fgsea_values_PC",
+        pc,
+        ".csv"
+      )
+    ),
+    row.names = FALSE
+  )
+
+
+  ##############################################################################
+  # Save ranked participant data
+  ##############################################################################
+
+  ranked_data$disease_case <- (
+    ranked_data$project_pseudo_id %in%
+      disease_cases
+  )
+
+
+  write.csv(
+    ranked_data,
+    file = file.path(
+      output_folder,
+      paste0(
+        disease,
+        "_ranked_participants_PC",
+        pc,
+        ".csv"
+      )
+    ),
+    row.names = FALSE
+  )
+
+
+  ##############################################################################
+  # Plot enrichment curve
+  ##############################################################################
+
+  enrichment_plot <- plotEnrichment(
+    disease_set$disease_cases,
+    ranked_scores,
+    ticksSize = 1e-9
+  ) +
+    labs(
+      title = paste0(
+        disease,
+        " enrichment – PC",
+        pc
+      ),
+      x = "Participant rank",
+      y = "Enrichment score"
+    ) +
+    theme_minimal()
+
+
+  ggsave(
+    filename = file.path(
+      output_folder,
+      paste0(
+        "enrichment_curve_",
+        disease,
+        "_PC",
+        pc,
+        "_",
+        score_type,
+        ".png"
+      )
+    ),
+    plot = enrichment_plot,
+    width = 12,
+    height = 7,
+    dpi = 300
+  )
+
+
+  ##############################################################################
+  # Return results
+  ##############################################################################
+
+  return(
+    list(
+      enrichment = enrichment_result,
+      ranked_data = ranked_data,
+      enrichment_plot = enrichment_plot
+    )
+  )
+}
+
+
+################################################################################
+# 5.3 Examine disease distribution across composite-score ranks
+################################################################################
+
+calculate_disease_distribution <- function(
+  ranked_data,
+  n_bins = 50
+) {
+
+  # Assign participants to approximately equal rank bins
+  ranked_data <- ranked_data %>%
+    mutate(
+      rank = row_number(),
+      rank_bin = ntile(
+        rank,
+        n_bins
+      )
+    )
+
+
+  # Calculate disease frequency within each rank bin
+  disease_distribution <- ranked_data %>%
+    group_by(
+      rank_bin
+    ) %>%
+    summarise(
+      n_participants = n(),
+      n_cases = sum(
+        disease_case,
+        na.rm = TRUE
+      ),
+      disease_proportion = (
+        n_cases /
+          n_participants
+      ),
+      mean_age = mean(
+        age_1a,
+        na.rm = TRUE
+      ),
+      .groups = "drop"
+    )
+
+
+  return(
+    disease_distribution
+  )
+}
+
+
+################################################################################
+# 5.4 Plot disease distribution across ranked composite scores
+################################################################################
+
+plot_disease_distribution <- function(
+  disease_distribution,
+  disease,
+  pc,
+  output_folder
+) {
+
+  p <- ggplot(
+    disease_distribution,
+    aes(
+      x = rank_bin,
+      y = disease_proportion
+    )
+  ) +
+    geom_col() +
+    labs(
+      title = paste0(
+        disease,
+        " distribution across PC",
+        pc,
+        " composite-score ranks"
+      ),
+      x = "Composite-score rank bin",
+      y = "Proportion developing disease"
+    ) +
+    theme_minimal()
+
+
+  ggsave(
+    filename = file.path(
+      output_folder,
+      paste0(
+        "disease_distribution_",
+        disease,
+        "_PC",
+        pc,
+        ".png"
+      )
+    ),
+    plot = p,
+    width = 12,
+    height = 7,
+    dpi = 300
+  )
+
+
+  return(p)
+}
+
+
+################################################################################
+# 5.5 Run enrichment analyses across diseases and PUMA dimensions
+################################################################################
+
+all_enrichment_results <- list()
+
+result_index <- 1
+
+
+for (disease in diseases) {
+
+  message(
+    "Processing disease: ",
+    disease
+  )
+
+
+  for (condition in pos_neg) {
+
+    # Folder containing disease-specific results
+    output_folder <- file.path(
+      result_folder,
+      paste0(
+        disease,
+        "_results_",
+        condition
+      )
+    )
+
+
+    if (!dir.exists(output_folder)) {
+      dir.create(
+        output_folder,
+        recursive = TRUE
+      )
+    }
+
+
+    for (pc in seq_len(n_pcs)) {
+
+      ##########################################################################
+      # Load disease-specific composite-score data
+      ##########################################################################
+
+      input_file <- file.path(
+        output_folder,
+        paste0(
+          disease,
+          "_age_content.csv"
+        )
+      )
+
+
+      disease_data <- read.csv(
+        input_file
+      )
+
+
+      ##########################################################################
+      # Run enrichment analysis
+      ##########################################################################
+
+      analysis <- run_disease_enrichment(
+        data = disease_data,
+        disease = disease,
+        pc = pc,
+        score_type = condition,
+        output_folder = output_folder
+      )
+
+
+      ##########################################################################
+      # Examine disease distribution across score ranks
+      ##########################################################################
+
+      disease_distribution <- calculate_disease_distribution(
+        ranked_data = analysis$ranked_data,
+        n_bins = n_bins
+      )
+
+
+      write.csv(
+        disease_distribution,
+        file = file.path(
+          output_folder,
+          paste0(
+            "disease_distribution_",
+            disease,
+            "_PC",
+            pc,
+            ".csv"
+          )
+        ),
+        row.names = FALSE
+      )
+
+
+      plot_disease_distribution(
+        disease_distribution = disease_distribution,
+        disease = disease,
+        pc = pc,
+        output_folder = output_folder
+      )
+
+
+      ##########################################################################
+      # Collect enrichment statistics
+      ##########################################################################
+
+      all_enrichment_results[
+        [result_index]
+      ] <- analysis$enrichment
+
+      result_index <- result_index + 1
+    }
+  }
+}
+
+
+################################################################################
+# 5.6 Combine enrichment results
+################################################################################
+
+all_fgsea <- bind_rows(
+  all_enrichment_results
+)
+
+
+# Create a unique analysis label
+all_fgsea <- all_fgsea %>%
+  mutate(
+    analysis = paste0(
+      disease,
+      "_PC",
+      PC,
+      "_",
+      score_type
+    )
+  )
+
+
+################################################################################
+# 5.7 Correct for multiple testing
+################################################################################
+
+# Benjamini-Hochberg false-discovery-rate correction across all
+# disease × PUMA dimension × enrichment-direction tests.
+
+all_fgsea <- all_fgsea %>%
+  mutate(
+    adjusted_p_value = p.adjust(
+      pval,
+      method = "BH"
+    ),
+    significant_raw = (
+      pval < significance_threshold
+    ),
+    significant_adjusted = (
+      adjusted_p_value <
+        significance_threshold
+    )
+  )
+
+
+# Save complete enrichment results
+write.csv(
+  all_fgsea,
+  file = file.path(
+    result_folder,
+    "all_disease_fgsea_results.csv"
+  ),
+  row.names = FALSE
+)
+
+
+################################################################################
+# 5.8 Plot enrichment results
+################################################################################
+
+# Plot normalized enrichment scores across all analyses.
+#
+# Statistical significance is based on the BH-adjusted P-value.
+
+p_summary <- ggplot(
+  all_fgsea,
+  aes(
+    x = NES,
+    y = analysis,
+    fill = significant_adjusted
+  )
+) +
+  geom_col() +
+  labs(
+    x = "Normalized enrichment score",
+    y = NULL,
+    fill = "BH-adjusted\nP < 0.05"
+  ) +
+  theme_minimal() +
+  theme(
+    axis.text.y = element_text(
+      hjust = 1
+    ),
+    panel.border = element_rect(
+      fill = NA,
+      linewidth = 1
+    )
+  )
+
+
+ggsave(
+  filename = file.path(
+    result_folder,
+    "all_disease_enrichment_results.png"
+  ),
+  plot = p_summary,
+  width = 8,
+  height = 15,
+  dpi = 300
+)
+
+
+################################################################################
+# 5.9 Plot enrichment results by disease
+################################################################################
+
+p_summary_by_disease <- ggplot(
+  all_fgsea,
+  aes(
+    x = NES,
+    y = analysis,
+    fill = significant_adjusted
+  )
+) +
+  geom_col() +
+  facet_wrap(
+    ~ disease,
+    scales = "free_y"
+  ) +
+  labs(
+    x = "Normalized enrichment score",
+    y = NULL,
+    fill = "BH-adjusted\nP < 0.05"
+  ) +
+  theme_minimal() +
+  theme(
+    axis.text.y = element_text(
+      hjust = 1
+    ),
+    text = element_text(
+      size = 18
+    ),
+    legend.position = "bottom",
+    panel.border = element_rect(
+      fill = NA,
+      linewidth = 1
+    )
+  )
+
+
+ggsave(
+  filename = file.path(
+    result_folder,
+    "all_disease_enrichment_results_by_disease.png"
+  ),
+  plot = p_summary_by_disease,
+  width = 20,
+  height = 12,
+  dpi = 300
+)
