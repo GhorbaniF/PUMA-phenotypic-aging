@@ -1,55 +1,225 @@
-####################################################################################################################
-####################Section1:pre-processing data#####################################################################
-##################################################################################################################
+################################################################################
+# Section 1: Data preprocessing
+################################################################################
 
-###Define File Name and Path
-file_name = "1a"
-file_path = paste(file_name, ".csv", sep = "")
-
-###Read the data
-df_org <- read.csv(file_path, stringsAsFactors=FALSE)
-
-#####Exclude specific columns
-exclude_cols <- c("project_pseudo_id", "variant_id", "date","gender","zip_code")
-df_exc <- df_org[, !(colnames(df_org) %in% exclude_cols)]
-
-####Replace $X with NA
-df_exc[] <- lapply(df_exc, function(x) gsub("\\$4", NA, x))
-df_exc[] <- lapply(df_exc, function(x) gsub("\\$5", NA, x))
-df_exc[] <- lapply(df_exc, function(x) gsub("\\$6", NA, x))
-df_exc[] <- lapply(df_exc, function(x) gsub("\\$7", NA, x))
-
-#######calculate the proportion of missing values in each column
-missing_proportion <- colMeans(is.na(df_exc))
-
-####Create a bar plot of missing values
-p <- ggplot(data.frame(variable = names(missing_proportion), missing_proportion = missing_proportion), 
-            aes(x = variable, y = missing_proportion, fill = missing_proportion)) +
-  geom_bar(stat = "identity") +
-  scale_y_continuous(limits = c(0, 1))+
-  scale_color_gradient(limits = c(0, 1))+
-  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))+
-  ggtitle("Proportion of Missing Values in Each Column") +
-  xlab("Variable") + ylab("Proportion of Missing Values")
-ggsave(filename = "1a_proportion_of_missing_values_files.pdf", plot = p, width = 45, height = 6)
-
-############## Keep Columns with Less than 75% Missing Values
-df_filtered <- df_exc[, which(missing_proportion < 0.75)]
+library(dplyr)
+library(ggplot2)
 
 
-########## Exclude Character Columns
-df_filtered <- type.convert(df_filtered, as.is=TRUE)
-df_filtered <- df_filtered %>% select_if(function(x) !is.character(x))
+################################################################################
+# 1.1 Load data
+################################################################################
+
+input_file <- "1a.csv"
+
+df_org <- read.csv(
+  input_file,
+  stringsAsFactors = FALSE
+)
 
 
-####Check Number of Remaining Variables after filtering (NOTE:  in file 1a, after filtering 1180 variables remained)
-ncol(df_filtered)
+################################################################################
+# 1.2 Exclude non-phenotypic variables
+################################################################################
+
+# Variables not included in the phenotypic analysis
+exclude_cols <- c(
+  "project_pseudo_id",
+  "variant_id",
+  "date",
+  "gender",
+  "zip_code"
+)
+
+df_filtered <- df_org %>%
+  select(
+    -any_of(exclude_cols)
+  )
 
 
-##### Handle missing values
-df <- df_filtered
+################################################################################
+# 1.3 Convert encoded missing values to NA
+################################################################################
 
-#########Remove Columns with Constant or Zero Variance (Keep only columns with non-zero variance)
-cols_with_variance <- sapply(df, sd) > 0
-cols_without_na <- !is.na(cols_with_variance) & cols_with_variance
-df_clean <- df[, cols_without_na]
+# Lifelines missing-value codes used in the source data
+missing_codes <- c(
+  "$4",
+  "$5",
+  "$6",
+  "$7"
+)
+
+df_filtered[] <- lapply(
+  df_filtered,
+  function(x) {
+
+    x <- as.character(x)
+
+    x[
+      x %in% missing_codes
+    ] <- NA
+
+    x
+  }
+)
+
+
+################################################################################
+# 1.4 Assess missingness
+################################################################################
+
+missing_proportion <- colMeans(
+  is.na(df_filtered)
+)
+
+missingness_df <- data.frame(
+  variable = names(missing_proportion),
+  missing_proportion = missing_proportion
+)
+
+
+# Plot proportion of missing values for each variable
+p_missing <- ggplot(
+  missingness_df,
+  aes(
+    x = variable,
+    y = missing_proportion
+  )
+) +
+  geom_col() +
+  scale_y_continuous(
+    limits = c(0, 1)
+  ) +
+  labs(
+    x = "Variable",
+    y = "Proportion of missing values",
+    title = "Proportion of Missing Values in Each Variable"
+  ) +
+  theme(
+    axis.text.x = element_text(
+      angle = 90,
+      vjust = 0.5,
+      hjust = 1
+    )
+  )
+
+
+ggsave(
+  filename = "1a_proportion_of_missing_values.pdf",
+  plot = p_missing,
+  width = 45,
+  height = 6
+)
+
+
+################################################################################
+# 1.5 Remove variables with high missingness
+################################################################################
+
+# Retain variables with less than 75% missing data
+missingness_threshold <- 0.75
+
+variables_to_keep <- names(
+  missing_proportion[
+    missing_proportion < missingness_threshold
+  ]
+)
+
+df_filtered <- df_filtered[
+  ,
+  variables_to_keep,
+  drop = FALSE
+]
+
+message(
+  ncol(df_filtered),
+  " variables retained after missingness filtering."
+)
+
+
+################################################################################
+# 1.6 Convert variables to appropriate data types
+################################################################################
+
+# Convert character representations of numeric variables to numeric where possible
+df_filtered <- type.convert(
+  df_filtered,
+  as.is = TRUE
+)
+
+# Retain numeric variables for PCA
+df_filtered <- df_filtered %>%
+  select(
+    where(is.numeric)
+  )
+
+message(
+  ncol(df_filtered),
+  " numeric variables retained."
+)
+
+
+################################################################################
+# 1.7 Remove zero-variance variables
+################################################################################
+
+# Calculate standard deviation while allowing for missing values
+variable_sd <- vapply(
+  df_filtered,
+  function(x) {
+    sd(
+      x,
+      na.rm = TRUE
+    )
+  },
+  numeric(1)
+)
+
+
+# Retain variables with non-zero variance
+variables_with_variance <- (
+  !is.na(variable_sd) &
+    variable_sd > 0
+)
+
+df_clean <- df_filtered[
+  ,
+  variables_with_variance,
+  drop = FALSE
+]
+
+message(
+  ncol(df_clean),
+  " variables retained after removing zero-variance variables."
+)
+
+
+################################################################################
+# 1.8 Add age and participant ID for downstream analyses
+################################################################################
+
+# Age and participant ID are excluded from PCA but retained for downstream
+# analyses, including age associations and participant-level score calculation.
+
+if ("age" %in% colnames(df_org)) {
+  df_clean$age <- df_org$age
+}
+
+if ("project_pseudo_id" %in% colnames(df_org)) {
+  df_clean$project_pseudo_id <- df_org$project_pseudo_id
+}
+
+
+################################################################################
+# 1.9 Save cleaned data
+################################################################################
+
+write.csv(
+  df_clean,
+  file = "df_1a_clean.csv",
+  row.names = FALSE
+)
+
+message(
+  "Preprocessing complete. Cleaned data saved as df_1a_clean.csv."
+)
