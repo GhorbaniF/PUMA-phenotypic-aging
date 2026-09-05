@@ -1,259 +1,380 @@
+################################################################################
+# Section 4: Composite score calculation and age standardization
+################################################################################
+
+library(dplyr)
+library(tidyr)
+library(ggplot2)
 
 
-#############################################################################################
-################################Section 4: Composite score calculation#######################
-###############################################################################################
+################################################################################
+# 4.1 Calculate composite scores for PUMA dimensions
+################################################################################
 
-file_name = "1a"
-file_path = paste(file_name, ".csv", sep = "")
-data_org <- read.csv(file_path, stringsAsFactors=FALSE)
-
+# Load data
+data_org <- read.csv("1a.csv", stringsAsFactors = FALSE)
 df_clean <- read.csv("df_1a_clean.csv")
 
-##Loading the data frame
-pca_fit <- readRDS(file = "pca_fit_data.rds")
+# Load PCA results
+pca_fit <- readRDS("pca_fit_data.rds")
 pca_scores <- as.data.frame(pca_fit$Component.scores)
 
-top_n_pca = 7
-for (i in 1:top_n_pca) {
-  
-  
-  print (paste0("computing model and composite score for PC" , i, "!") )
-  
-  ## Retain the score of target PC
-  target_pc = i
-  target_pca_score <- pca_scores[, target_pc] 
-  
-  # Step 1: Read the variables from the corresponding CSV file
-  selected = read.csv(paste0("pc", i, "_filtered_sorted_pvalues_by_partial_corrolation.csv"))
-  
-  # Step 2: Extract the variable names
-  selected_variables <- selected$variable
-  selected_variables <- selected_variables[-1]
-  
-  # Step 3: Subset the df_clean dataframe
-  subset_data <- df_clean[, selected_variables]
-  
-  #  Step 4: Perform linear regression on the subset data
-  lm_model <- lm(target_pca_score ~ . , data = subset_data)
-  
-  # calculate the composite scores
-  composite_scores <- predict(lm_model)
-  
-  # Add the composite scores to the selected data frame
-  subset_data$composite_score <- composite_scores
-  
-  subset_data$project_pseudo_id <- data_org$project_pseudo_id
-  subset_data$age <- df_clean$age
-  
-  file_path <- paste0("composite_score_PC", target_pc, "_LM.csv")
-  write.csv(subset_data, file = file_path, row.names = FALSE)
-  
+# Number of PUMA dimensions
+n_pcs <- 7
+
+
+for (pc in seq_len(n_pcs)) {
+
+  message("Calculating composite score for PC", pc)
+
+  # PCA score for the current component
+  target_pca_score <- pca_scores[[pc]]
+
+  # Load variables contributing to the current component
+  selected <- read.csv(
+    paste0(
+      "pc",
+      pc,
+      "_filtered_sorted_pvalues_by_partial_corrolation.csv"
+    )
+  )
+
+  # The first entry is excluded, as in the original analysis
+  selected_variables <- selected$variable[-1]
+
+  # Data used to reconstruct the PCA score
+  model_data <- df_clean[, selected_variables, drop = FALSE]
+
+  # Fit a multiple linear regression model
+  model <- lm(
+    target_pca_score ~ .,
+    data = model_data
+  )
+
+  # Calculate the composite score
+  model_data$composite_score <- predict(model)
+
+  # Add participant information
+  model_data$project_pseudo_id <- data_org$project_pseudo_id
+  model_data$age <- df_clean$age
+
+  # Save composite scores
+  output_file <- paste0(
+    "composite_score_PC",
+    pc,
+    "_LM.csv"
+  )
+
+  write.csv(
+    model_data,
+    file = output_file,
+    row.names = FALSE
+  )
 }
 
 
-###########composite score vs age  (this is to see if it has the same pattern as PC vs age)########### 
+################################################################################
+# 4.2 Examine composite scores across age groups
+################################################################################
+
+# Read composite scores for all seven dimensions
+composite_scores <- lapply(seq_len(n_pcs), function(pc) {
+
+  df <- read.csv(
+    paste0(
+      "composite_score_PC",
+      pc,
+      "_LM.csv"
+    )
+  )
+
+  data.frame(
+    project_pseudo_id = df$project_pseudo_id,
+    age = df$age,
+    PC = paste0("PC", pc),
+    composite_score = df$composite_score
+  )
+
+}) %>%
+  bind_rows()
 
 
-df_tmp <- read.csv("composite_score_PC1_LM.csv")
-df.composite.scores <- as.data.frame(df_tmp$composite_score)
-names(df.composite.scores) <- "composite_score_PC1"
-
-df_tmp <- read.csv("composite_score_PC2_LM.csv")
-df.composite.scores$composite_score_PC2 <- df_tmp$composite_score
-
-df_tmp <- read.csv("composite_score_PC3_LM.csv")
-df.composite.scores$composite_score_PC3 <- df_tmp$composite_score
-
-df_tmp <- read.csv("composite_score_PC4_LM.csv")
-df.composite.scores$composite_score_PC4 <- df_tmp$composite_score
-
-df_tmp <- read.csv("composite_score_PC5_LM.csv")
-df.composite.scores$composite_score_PC5 <- df_tmp$composite_score
-
-df_tmp <- read.csv("composite_score_PC6_LM.csv")
-df.composite.scores$composite_score_PC6 <- df_tmp$composite_score
-
-df_tmp <- read.csv("composite_score_PC7_LM.csv")
-df.composite.scores$composite_score_PC7 <- df_tmp$composite_score
-df.composite.scores$age <- df_tmp$age
-
-# Create age groups
-df.composite.scores$age_group <- cut(df.composite.scores$age, breaks = seq(0, 100, 10))
-head(df.composite.scores$age_group, n =10)
-
-# Calculate the average composite scores for each age group
-df.composite.scores.grouped.mean <- df.composite.scores %>% 
-  group_by(age_group) %>% 
-  summarize_all(suppressWarnings(funs(mean(., na.rm = TRUE))))
+# Create 10-year age groups and calculate mean composite scores
+composite_scores_by_age <- composite_scores %>%
+  mutate(
+    age_group = cut(
+      age,
+      breaks = seq(0, 100, by = 10),
+      include.lowest = TRUE
+    )
+  ) %>%
+  group_by(PC, age_group) %>%
+  summarise(
+    mean_composite_score = mean(
+      composite_score,
+      na.rm = TRUE
+    ),
+    .groups = "drop"
+  )
 
 
-# Define a list of PCA components to iterate over
-composite_components <- paste0("PC", 1:7)
+# Plot composite scores across age groups
+p <- ggplot(
+  composite_scores_by_age,
+  aes(
+    x = age_group,
+    y = mean_composite_score,
+    group = PC,
+    color = PC
+  )
+) +
+  geom_line(
+    linewidth = 1.5
+  ) +
+  geom_point(
+    size = 4
+  ) +
+  labs(
+    x = "Age group",
+    y = "Mean composite score",
+    title = "Composite Scores by Age Group"
+  ) +
+  theme(
+    legend.position = "right",
+    axis.text = element_text(size = 14),
+    axis.title = element_text(size = 16),
+    plot.title = element_text(
+      size = 18,
+      hjust = 0.5
+    )
+  )
 
-names(colors) <- paste0("PC", 1:7)
 
-p <- ggplot(df.composite.scores.grouped.mean, aes(x = age_group, y = composite_score_PC1)) +  
-  geom_line(aes(y = composite_score_PC1, group = 1, color = "PC1"), linewidth = 1.5, show.legend = TRUE) +
-  geom_point(aes(y = composite_score_PC1, group = 1, color = "PC1"), size = 5, shape = 19) +
-  
-  geom_line(aes(y = composite_score_PC2, group = 1, color = "PC2"), linewidth = 1.5, show.legend = TRUE) +
-  geom_point(aes(y = composite_score_PC2, group = 1, color = "PC2"), size = 5, shape = 19) +
-  geom_line(aes(y = composite_score_PC3, group = 1, color = "PC3"), linewidth = 1.5, show.legend = TRUE) +
-  geom_point(aes(y = composite_score_PC3, group = 1, color = "PC3"), size = 5, shape = 19) +
-  geom_line(aes(y = composite_score_PC4, group = 1, color = "PC4"), linewidth = 1.5, show.legend = TRUE) +
-  geom_point(aes(y = composite_score_PC4, group = 1, color = "PC4"), size = 5, shape = 19) +
-  geom_line(aes(y = composite_score_PC5, group = 1, color = "PC5"), linewidth = 1.5, show.legend = TRUE) +
-  geom_point(aes(y = composite_score_PC5, group = 1, color = "PC5"), size = 5, shape = 19) +
-  geom_line(aes(y = composite_score_PC6, group = 1, color = "PC6"), linewidth = 1.5, show.legend = TRUE) +
-  geom_point(aes(y = composite_score_PC6, group = 1, color = "PC6"), size = 4, shape = 19) +
-  geom_line(aes(y = composite_score_PC7, group = 1, color = "PC7"), linewidth = 1.5, show.legend = TRUE) +
-  geom_point(aes(y = composite_score_PC7, group = 1, color = "PC7"), size = 4, shape = 19) +
-  
-  xlab("Age Group") + ylab("Composite Score") + 
-  scale_color_manual(values = colors) +
-  theme(legend.position = "right",
-        axis.text = element_text(size = 14),
-        axis.title = element_text(size = 16),
-        plot.title = element_text(size = 18, hjust = 0.5))+
-  ggtitle("Composite Scores by Age Group")
-ggsave(filename = "composite_score_vs_ages.pdf", plot = p, width = 15, height = 12)
+ggsave(
+  filename = "composite_score_vs_ages.pdf",
+  plot = p,
+  width = 15,
+  height = 12
+)
 
 
+################################################################################
+# 4.3 Age-standardize composite scores using a rolling reference window
+################################################################################
 
-###########calculate z_score for composite score using 500 younger and older individuals###   
-      if (!disease_specific_z_score)
-      {
-      
-          ############################################## 
-          ### Method1: grouping by 10 years interval ###
-          ############################################## 
-          
-          ## Create age groups
-          #df_cs$age_group <- cut(df_cs$age, breaks = seq(0, 100, 10),
-          #                     labels = c("0-10", "10-20", "20-30", "30-40", "40-50", 
-          #                                "50-60", "60-70", "70-80", "80-90", "90-100"),
-          #                     include.lowest = TRUE)
-        
-          ## Calculate mean and standard deviation for each age group
-          #mean_std_scores <- df_cs %>%
-          #  group_by(age_group) %>%
-          #  summarise(mean_composite_score = mean(composite_score, na.rm = TRUE),
-          #            std_composite_score = sd(composite_score, na.rm = TRUE))
-          
-          ## Merge mean scores back to the original dataframe
-          #df_cs <- merge(df_cs, mean_std_scores, by = "age_group", all.x = TRUE)
-          
-          ## Calculate the z-score for each composite score, handling divisions by 0
-          #df_cs$general_z_score <- ifelse(df_cs$std_composite_score == 0, 0,
-          #                                (df_cs$composite_score - df_cs$mean_composite_score) / df_cs$std_composite_score)
-  
-          #df_cs$composite_score <- df_cs$general_z_score
-  
-          
-          ############################################## 
-          ### Method2: sliding window ##################
-          ############################################## 
-          
-          # Rank patients by age
-          df_cs <- df_cs %>%
-            arrange(age) %>%
-            mutate(age_rank = row_number())
-          
-          # Define a rolling window function
-          rolling_stats <- function(index, scores, window_size = 500) {
-            start <- max(1, index - window_size)
-            end <- min(length(scores), index + window_size)
-            window <- scores[start:end]
-            list(mean = mean(window, na.rm = TRUE), sd = sd(window, na.rm = TRUE))
-          }
-          
-          # Apply the rolling window to calculate mean and sd
-          rolling_results <- sapply(1:nrow(df_cs), function(i) {
-            stats <- rolling_stats(i, df_cs$composite_score)
-            c(stats$mean, stats$sd)
-          })
-          
-          # Add rolling mean and sd back to the dataframe
-          df_cs$rolling_mean <- rolling_results[1, ]
-          df_cs$rolling_sd <- rolling_results[2, ]
-          
-          
-          # store the original composite score
-          df_cs$original_composite_score <- df_cs$composite_score
-          
-          # Calculate the z-score using rolling statistics
-          df_cs$general_z_score <- ifelse(df_cs$rolling_sd == 0, 0,
-                                          (df_cs$composite_score - df_cs$rolling_mean) / df_cs$rolling_sd)
-          
-          # Update the composite score with the z-score
-          ### we comment this part to use composite score instead of z_score 
-          df_cs$composite_score <- df_cs$general_z_score
-          
-            
-          # Clean up by removing temporary columns if needed
-          df_cs <- df_cs %>%
-            select(-rolling_mean, -rolling_sd, -age_rank)
-            
-          
-      }
-      
-      ##############################################################################################
-      ##############################################################################################
-      
-      
-      
-      # Left join based on "project_pseudo_id"
-      merged_dfs_and_cs <- left_join(merged_dfs, df_cs, by = "project_pseudo_id")
-      
-      #print (names(merged_dfs_and_cs))
-      ##############################################################################################
-      ###### new modification to calc relative composite score ######## 
-            
-      # Add age to the datafarme from df_clean based on the "project_pseudo_id" column
-      merged_dfs_and_cs <- merge(merged_dfs_and_cs, df_clean[, c("project_pseudo_id", "age_1a")], by = "project_pseudo_id", all.x = FALSE)
+# This function standardizes each participant's composite score relative to
+# participants with nearby positions in the age-ranked dataset.
+#
+# For each participant, the reference window includes up to 'window_size'
+# participants below and above that participant in the age-ranked dataset.
 
-      
-      if (disease_specific_z_score)
-      {
-          # Create age groups
-          merged_dfs_and_cs$age_group_1a <- cut(merged_dfs_and_cs$age_1a, breaks = seq(0, 100, by = 10),
-                                             labels = c("0-10", "10-20", "20-30", "30-40", "40-50", 
-                                                        "50-60", "60-70", "70-80", "80-90", "90-100"),
-                                             include.lowest = TRUE)
-    
-    
-          # Calculate mean composite score for each age group
-          mean_std_scores <- merged_dfs_and_cs %>%
-                              group_by(age_group_1a) %>%
-                              summarise(mean_composite_score = mean(composite_score),
-                              std_composite_score = sd(composite_score))
-    
-          
-          # Merge mean scores back to the original dataframe
-          merged_dfs_and_cs <- merge(merged_dfs_and_cs, mean_std_scores, by = "age_group_1a", all.x = TRUE)
-          
-          
-          # Calculate the z-score for each composite score
-          merged_dfs_and_cs$z_score <- (merged_dfs_and_cs$composite_score - merged_dfs_and_cs$mean_composite_score) / merged_dfs_and_cs$std_composite_score
-    
-    
-          # Replace NA values in the z_score column with 0 (this is happend when std == 0)
-          merged_dfs_and_cs$z_score <- replace_na(merged_dfs_and_cs$z_score, 0)
-    
-    
-          # store the original composite score
-          merged_dfs_and_cs$original_composite_score <- merged_dfs_and_cs$composite_score
-          
-          # we replace the composite score with z_score to fit the data to the following steps
-          # merged_dfs_and_cs$composite_score <- merged_dfs_and_cs$z_score
-          
-          
-          # we replace the composite score with z_score to fit the data to the following steps
-          merged_dfs_and_cs$composite_score <- merged_dfs_and_cs$z_score
-      }
-      #print ("test2")
-      
-      
-      # Write the merged data frame to a new CSV file to check its content
-      write.csv(merged_dfs_and_cs, paste(results_folder, disease, "_age_content.csv", sep = ""))
+age_standardize_rolling <- function(
+  data,
+  window_size = 500
+) {
+
+  # Sort participants by age
+  data <- data %>%
+    arrange(age)
+
+  scores <- data$composite_score
+  n <- length(scores)
+
+  # Calculate the local mean and standard deviation
+  rolling_stats <- vapply(
+    seq_len(n),
+    function(i) {
+
+      start_index <- max(
+        1,
+        i - window_size
+      )
+
+      end_index <- min(
+        n,
+        i + window_size
+      )
+
+      reference_scores <- scores[
+        start_index:end_index
+      ]
+
+      c(
+        mean = mean(
+          reference_scores,
+          na.rm = TRUE
+        ),
+        sd = sd(
+          reference_scores,
+          na.rm = TRUE
+        )
+      )
+    },
+    numeric(2)
+  )
+
+  # Calculate age-standardized scores
+  data <- data %>%
+    mutate(
+      original_composite_score = composite_score,
+
+      rolling_mean = rolling_stats[
+        "mean",
+      ],
+
+      rolling_sd = rolling_stats[
+        "sd",
+      ],
+
+      general_z_score = ifelse(
+        is.na(rolling_sd) |
+          rolling_sd == 0,
+        0,
+        (
+          composite_score -
+            rolling_mean
+        ) / rolling_sd
+      ),
+
+      composite_score = general_z_score
+    ) %>%
+    select(
+      -rolling_mean,
+      -rolling_sd
+    )
+
+  return(data)
+}
+
+
+# Apply general age standardization when disease-specific
+# standardization is not requested
+if (!disease_specific_z_score) {
+
+  df_cs <- age_standardize_rolling(
+    df_cs,
+    window_size = 500
+  )
+}
+
+
+################################################################################
+# 4.4 Merge composite scores with disease-analysis data
+################################################################################
+
+# Merge composite scores with the disease-analysis dataset
+merged_dfs_and_cs <- left_join(
+  merged_dfs,
+  df_cs,
+  by = "project_pseudo_id"
+)
+
+
+# Add baseline age
+merged_dfs_and_cs <- merge(
+  merged_dfs_and_cs,
+  df_clean[
+    ,
+    c(
+      "project_pseudo_id",
+      "age_1a"
+    )
+  ],
+  by = "project_pseudo_id",
+  all.x = FALSE
+)
+
+
+################################################################################
+# 4.5 Disease-specific age standardization
+################################################################################
+
+if (disease_specific_z_score) {
+
+  # Create 10-year age groups
+  merged_dfs_and_cs <- merged_dfs_and_cs %>%
+    mutate(
+      age_group_1a = cut(
+        age_1a,
+        breaks = seq(
+          0,
+          100,
+          by = 10
+        ),
+        labels = c(
+          "0-10",
+          "10-20",
+          "20-30",
+          "30-40",
+          "40-50",
+          "50-60",
+          "60-70",
+          "70-80",
+          "80-90",
+          "90-100"
+        ),
+        include.lowest = TRUE
+      )
+    )
+
+
+  # Calculate the mean and standard deviation of the composite score
+  # within each age group
+  age_group_statistics <- merged_dfs_and_cs %>%
+    group_by(age_group_1a) %>%
+    summarise(
+      mean_composite_score = mean(
+        composite_score,
+        na.rm = TRUE
+      ),
+      sd_composite_score = sd(
+        composite_score,
+        na.rm = TRUE
+      ),
+      .groups = "drop"
+    )
+
+
+  # Add age-group statistics to each participant
+  merged_dfs_and_cs <- merged_dfs_and_cs %>%
+    left_join(
+      age_group_statistics,
+      by = "age_group_1a"
+    )
+
+
+  # Store the original composite score and calculate the z-score
+  merged_dfs_and_cs <- merged_dfs_and_cs %>%
+    mutate(
+      original_composite_score = composite_score,
+
+      z_score = ifelse(
+        is.na(sd_composite_score) |
+          sd_composite_score == 0,
+        0,
+        (
+          composite_score -
+            mean_composite_score
+        ) / sd_composite_score
+      ),
+
+      composite_score = z_score
+    )
+}
+
+
+################################################################################
+# 4.6 Save output
+################################################################################
+
+output_file <- paste0(
+  results_folder,
+  disease,
+  "_age_content.csv"
+)
+
+write.csv(
+  merged_dfs_and_cs,
+  file = output_file,
+  row.names = FALSE
+)
