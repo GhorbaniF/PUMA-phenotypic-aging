@@ -37,7 +37,6 @@ PUMA-phenotypic-aging/
 ├── 04_composite_score_calculation/          # Composite-score calculation and age standardization
 ├── 05_disease_enrichment_analysis/        # Prospective disease enrichment analyses
 ├── README.md
-└── LICENSE
 ```
 
 ## Installation
