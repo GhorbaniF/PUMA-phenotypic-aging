@@ -63,10 +63,17 @@ Before running the pipeline:
 - Update the input and output file paths as needed.
 - If running on an HPC cluster, load the appropriate R module (if required).
 
-Run the pipeline with:
+## Running the analysis
+
+Run the analysis scripts sequentially from the repository root:
+
 ```bash
-Rscript puma_pipeline.R
-```
+Rscript 01_preprocessing/01_preprocessing.R
+Rscript 02_dimensionality_reduction/02_dimensionality_reduction.R
+Rscript 03_partial_correlation/03_partial_correlation.R
+Rscript 04_composite_scores/04_composite_scores.R
+Rscript 05_disease_enrichment/05_disease_enrichment.R
+
 ## Data availability
 The Lifelines cohort data used in this study are not publicly available due to participant privacy and data-sharing restrictions.
 Researchers interested in accessing the data should apply directly through the Lifelines study (https://www.lifelines.nl).
@@ -74,7 +81,8 @@ Researchers interested in accessing the data should apply directly through the L
 ## Citation
 If you use PUMA in your research, please cite:
 Ghorbani F, et al. PUMA: Phenotypic Unsupervised Model of Aging Reveals Distinct Aging Dimensions.
-bioRxiv, 2026.
+bioRxiv, 2026. doi: https://doi.org/10.64898/2026.07.22.740035.
+
 
 ## Project status
 This repository accompanies the PUMA bioRxiv preprint. Updates may be made as the manuscript progresses through peer review.
