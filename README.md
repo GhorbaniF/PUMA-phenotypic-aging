@@ -74,6 +74,7 @@ Rscript 03_partial_correlation/03_partial_correlation.R
 Rscript 04_composite_scores/04_composite_scores.R
 Rscript 05_disease_enrichment/05_disease_enrichment.R
 
+
 ## Data availability
 The Lifelines cohort data used in this study are not publicly available due to participant privacy and data-sharing restrictions.
 Researchers interested in accessing the data should apply directly through the Lifelines study (https://www.lifelines.nl).
