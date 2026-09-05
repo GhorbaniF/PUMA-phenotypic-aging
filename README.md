@@ -13,7 +13,7 @@ flowchart TD
     --> C[Phenotypic aging dimensions]
     --> D[Identification of phenotypic contributors]
     --> E[Generation of composite scores]
-    --> F[Disease association analyses]
+    --> F[Disease enrichment analyses]
 ```
 
 ## Features
@@ -59,7 +59,7 @@ The pipeline requires the following R packages:
 
 
 ## Usage
-The `pipeline/` directory contains the R implementation of the complete PUMA workflow. The pipeline was developed and tested using **R 4.2.1**.
+The PUMA workflow is implemented in five sequential analysis steps corresponding to the numbered directories above. The pipeline was developed and tested using R 4.2.1. 
 Before running the pipeline:
 - Update the input and output file paths as needed.
 - If running on an HPC cluster, load the appropriate R module (if required).
