@@ -65,8 +65,6 @@ Before running the pipeline:
 
 ## Running the analysis
 
-## Running the analysis
-
 Run the analysis scripts sequentially from the repository root:
 
 ```bash
