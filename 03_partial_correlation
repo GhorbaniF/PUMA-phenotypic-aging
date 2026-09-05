@@ -1,0 +1,132 @@
+####################################################################################
+#########################Section 3: Partial correlation###############################
+##################################################################################
+### preparing the data for partial correlation
+# Retain top-n best PCs 
+df.pca <- pca_scores[, 1:top_n_pca] 
+
+###if you are using the pca_fit_data.rds of the InDPCA, you also need to upload the df_1a
+df_clean <- read.csv("df_1a_clean.csv")
+exclude_cols <- c("X.1", "X", "age")
+df_clean_without_age <- df_clean[, !(colnames(df_clean) %in% exclude_cols)]
+
+
+# Combine PCA Components with the Clean Data to have a complete data frame (df.all, contains the original variables and the selected PCs as additional features.)
+df.all <- cbind(df_clean_without_age, df.pca) 
+
+# Print the size
+df_size <- dim(df.all)
+
+#Create a list of PCA components to iterate over or reference later.
+pca_components <- paste0("V", 1:top_n_pca)
+
+#Assigned the total number of columns in df.all which might be used later
+top_n = df_size[2] 
+
+###Calculate the partial correlation matrix (pcor_matrix) of the combined dataset (df.all)
+#system is computationally singular: reciprocal condition number
+#The problem is because of limitations in floating-point computations and precision, not anything inherently mathematical or statistical.
+
+tryCatch(
+  expr = {
+    pcor_matrix <- pcor(df.all)
+  },
+  error = function(e){ 
+    
+    print ("a floating-point problem happened!")
+  }
+)
+
+##Replace Missing Values in the Partial Correlation Matrix
+pcor_matrix[is.na(pcor_matrix)] <- 0
+
+# Exclude Rows and Columns Related to PCs (we only want to calculate the correlation between each PC and the variabes
+#and not PC with PC)
+n = nrow(pcor_matrix$p.value)
+m = length(pca_components)
+pcor_matrix_excluding_pcs_estimate <- pcor_matrix$estimate[1:(n - m), 1:(n - m)]
+pcor_matrix_excluding_pcs_pvalues <- pcor_matrix$p.value[1:(n - m), 1:(n - m)]
+
+##Rename Columns of the Filtered Matrices
+colnames (pcor_matrix_excluding_pcs_estimate) <- colnames(df.all)[1:(n - m)]
+colnames (pcor_matrix_excluding_pcs_pvalues) <- colnames(df.all)[1:(n - m)]
+
+
+
+
+##iterating over PCA components and updating the partial correlation matrices to include the relationships between each PCA component and variables
+
+for (i in 1:length(pca_components)) {   
+  
+# Clean df.all at the beginning of each iteration
+df_all_estimate <- data.frame()
+df_all_pvalue <- data.frame()
+  
+# Update the Partial Correlation Matrix by adding the Current PCA Component as a Column 
+tmp_col <- data.frame(pcor_matrix$estimate[1:(n-m), (n - m) + i])
+df_all_estimate <- cbind(pcor_matrix_excluding_pcs_estimate, tmp_col) 
+
+#Update the Partial Correlation Matrix by adding the Current PCA Component as a Row
+tmp_row <- data.frame(t(pcor_matrix$estimate[(n - m) + i, 1:(n-m)]))
+tmp_row [1, ncol(tmp_row) + 1] = pcor_matrix$estimate[n - m + i, n - m + i]
+df_all_estimate[nrow(df_all_estimate)+1,] <- tmp_row 
+
+##Update Column Names
+colnames (df_all_estimate) <- colnames(df.all)[1:(n - m)]
+colnames (df_all_estimate)[nrow(df_all_pvalue)] <- paste0("V" , i)
+
+##Update the Partial Correlation Matrix for p-values
+tmp_col <- data.frame(pcor_matrix$p.value[1:(n-m), (n - m) + i])
+df_all_pvalue <- cbind(pcor_matrix_excluding_pcs_pvalues, tmp_col) 
+  
+##Add the Current PCA Component as a Row
+tmp_row <- data.frame(t(pcor_matrix$p.value[(n - m) + i, 1:(n-m)]))
+tmp_row [1, ncol(tmp_row) + 1] = pcor_matrix$p.value[n - m + i, n - m + i]
+df_all_pvalue[nrow(df_all_pvalue)+1,] <- tmp_row 
+  
+##Update column names
+colnames (df_all_pvalue) <- colnames(df.all)[1:(n - m)]
+colnames (df_all_pvalue)[nrow(df_all_pvalue)] <- paste0("V" , i)
+
+
+###analyze, filter, and visualize the partial correlations and their significance for each PCA component in relation to other variables
+# Extract the current PCA component
+col_index <- ncol(df_all_pvalue)
+
+# Get the p-values and partial correlation values for the pca_component variable
+p_values <- df_all_pvalue[, col_index]
+cor_values <- df_all_estimate[, col_index]
+
+# Sort p-values based on the sorted indices
+indices <- order(p_values, decreasing = FALSE)
+sorted_p_values <- p_values[indices][1:top_n]
+
+# Adjusting p-value
+adjusted_p_values <- p.adjust(sorted_p_values, method = "bonferroni")
+
+# Extract top loadings and corresponding variables
+top_loadings <- cor_values[indices][1:top_n]
+top_variables <- colnames(df_all_pvalue)[indices][1:top_n]
+
+# Create a data frame with the top-n loadings and variable names
+top_loadings_df <- data.frame(variable = top_variables, pcor_values = abs(top_loadings), p_values = sorted_p_values, adjusted_p_values = adjusted_p_values)
+write.csv(top_loadings_df, paste0("pc", i, "_partial_corrolation_pvalues.csv"))
+##This file contains the p-values and partial correlation values for each of the variables of each PC
+
+##Define threshold for the correlation and p-values
+p_value_threshold = 0.001
+threshold_p_cor = 0.2
+
+#Select the top variables for the PCs based on p-values
+filtered_top_loadings_df <- subset(top_loadings_df, p_values < p_value_threshold)
+sorted_filtered_top_loadings_df <- filtered_top_loadings_df[order(filtered_top_loadings_df$pcor_values, decreasing = TRUE), ]
+write.csv(sorted_filtered_top_loadings_df, paste0("pc", i, "sorted_pvalues.csv"))
+##this file contains all variables with p-value< 0001
+
+# Exclude Self-Correlation (first row showing the correlation of PC1 by PC1, which is always 1)
+top_loadings_df <- sorted_filtered_top_loadings_df[-1, ]
+
+# Filter by Partial Correlation Threshold
+top_loadings_df2 <- subset(top_loadings_df, pcor_values > threshold_p_cor)
+write.csv(top_loadings_df2, paste0("pc", i, "_filtered_sorted_pvalues_by_partial_corrolation.csv"))
+#this file contains all variables with with p-value< 0001 and pcor>0.2
