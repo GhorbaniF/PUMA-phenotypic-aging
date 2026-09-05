@@ -1,158 +1,392 @@
-################################################################################################################
-###########Section 2: dimensionality reduction###################################################################
-##################################################################################################################
+################################################################################
+# Section 2: Dimensionality reduction
+################################################################################
 
-##########defining the function InDaPCA () to later perform PCA on a given raw dataset 
-InDaPCA<-function(RAW){
-  #scaling
-  X <- scale(RAW, center = T, scale = T)
-  #correlation
-  C<-cor(X, use="pairwise.complete.obs")
-  #Eigenvalue
-  Eigenvalues<-eigen(C)$values
-  Eigenvalues.pos<-Eigenvalues[Eigenvalues>0]
-  Eigenvalues.pos.as.percent<-100*Eigenvalues.pos/sum(Eigenvalues.pos)
-  #Eigenvectors
-  V <- eigen(C)$vectors
-  #Principal components
-  X2<-X
-  X2[is.na(X2)] <- 0
-  PC <- as.matrix(X2) %*% V
-  #object.standardized
-  PCstand1 <- PC[,Eigenvalues>0]/sqrt(Eigenvalues.pos)[col(PC[,Eigenvalues>0])]
-  PCstand2 <- PCstand1 / sqrt(nrow(PC) - 1)
-  #loadings
-  #loadings<-V%*%diag(sqrt(Eigenvalues.pos))
-  loadings<-cor(X,PC,use="pairwise.complete.obs")
-  #arrows for biplot
-  arrows<-cor(X,PC,use="pairwise.complete.obs")*sqrt(nrow(X) - 1)
-  #output
-  PCA <- list()
-  PCA$Correlation.matrix<-C
-  PCA$Eigenvalues<-Eigenvalues
-  PCA$Positive.Eigenvalues<-Eigenvalues.pos
-  PCA$Positive.Eigenvalues.as.percent<-100*Eigenvalues.pos/sum(Eigenvalues.pos)
-  PCA$Square.root.of.eigenvalues <- sqrt(Eigenvalues.pos)
-  PCA$Eigenvectors<-V
-  PCA$Component.scores<-PC
-  PCA$Variable.scores<-loadings
-  PCA$Biplot.objects<-PCstand2
-  PCA$Biplot.variables<-arrows
-  return(PCA)
-}
-
-####Excluding the X and age columns
-df_clean_without_age <- df_clean[,-1] 
-df_clean_without_age <-df_clean_without_age[,-1]
+library(dplyr)
+library(tidyr)
+library(ggplot2)
 
 
-# Perform PCA  using the previously defined function InDaPCA()
-pca_fit <-InDaPCA(df_clean_without_age)
+################################################################################
+# 2.1 Define PCA function
+################################################################################
 
-#Optional: If you want to check the components of the PCA results which include:
-#[1] "Correlation.matrix"              "Eigenvalues"
-#[3] "Positive.Eigenvalues"            "Positive.Eigenvalues.as.percent"
-#[5] "Square.root.of.eigenvalues"      "Eigenvectors"
-#[7] "Component.scores"                "Variable.scores"
-#[9] "Biplot.objects"                  "Biplot.variables"
-names(pca_fit)
+# InDaPCA performs PCA using the correlation matrix of the standardized
+# phenotypic variables.
+#
+# Missing values are handled pairwise when estimating the correlation matrix.
+# For calculation of component scores, missing standardized values are set to 0.
 
-#####Saves the pca_fit object as an R object to preserve the entire structure of pca_fit
-saveRDS(pca_fit, file = "pca_fit_data.rds")
+InDaPCA <- function(raw_data) {
 
-###Reload the pca_fit object from the file to continue analysis without having to rerun the PCA.
-pca_fit <- readRDS(file = "pca_fit_data.rds")
+  # Standardize variables
+  X <- scale(
+    raw_data,
+    center = TRUE,
+    scale = TRUE
+  )
 
+  # Calculate correlation matrix
+  correlation_matrix <- cor(
+    X,
+    use = "pairwise.complete.obs"
+  )
 
-#Obtaining the component scores and variable scores from the PCA results
-pca_scores <- as.data.frame(pca_fit$Component.scores)
+  # Eigendecomposition
+  eigen_decomposition <- eigen(
+    correlation_matrix
+  )
 
-###Eigenvalues of the PCA, representing the variance captured by each component
-###and Retrieval Scores representing the proportion of total variation explained by each component, formatted to 3 decimal places and converted into a data frame.
-eigen_values <- pca_fit$Eigenvalues
-total_variation <- sum(eigen_values^2)
-retrieval_score <- (eigen_values^2/total_variation)
-retrieval_score <- as.data.frame(as.numeric(formatC(retrieval_score, format="f", digits=3)))
+  eigenvalues <- eigen_decomposition$values
+  eigenvectors <- eigen_decomposition$vectors
 
+  # Retain positive eigenvalues
+  positive_eigenvalues <- eigenvalues[
+    eigenvalues > 0
+  ]
 
-####### Select the PCs which explain more than 1% of the data and plot it
-top_n_pca <- length(which(retrieval_score[, 1] > 0.01))
-df_score <- data.frame(variable = names(pca_scores)[1:top_n_pca], retrieval_score = retrieval_score[1:top_n_pca, 1])
-p <- ggplot(df_score, aes(x = variable, y = retrieval_score, fill = retrieval_score)) +
-  geom_bar(stat = "identity") +
-  scale_x_discrete(limits = df_score$variable) +
-  scale_y_continuous(limits = c(0, max(retrieval_score[1])))+
-  scale_fill_gradient2(low = "blue", , mid = "blue", high = "red") +
-  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1, size = 14),
-        axis.text = element_text(size = 14),
-        axis.title = element_text(size = 16),
-        plot.title = element_text(size = 18, hjust = 0.5))+
-  ggtitle("Retrieval score of top PCA component") +
-  xlab("PCA components") + ylab("Retrieval score (%)")
-ggsave(filename = "retrieval_score_PCA_component_top_n.pdf", plot = p, width = 8, height = 4)
-### this plot shows the seven top PCs and their loadings as seen in the paper
+  positive_eigenvalues_percent <- (
+    100 *
+      positive_eigenvalues /
+      sum(positive_eigenvalues)
+  )
 
-####### We decided to flip the loading of the 7 pcs except PC5 based on the results 
-for (i in 1:top_n_pca) {
-  
-  if (i != 5)
-  {  
-    print (paste0("fliping loading of PC" , i, "!") )
-    pca_scores[, i] = - pca_scores[, i]
-  } 
-} 
+  # Replace missing standardized values with zero for calculation
+  # of component scores
+  X_for_scores <- X
+  X_for_scores[
+    is.na(X_for_scores)
+  ] <- 0
 
-#######################################PC score vs age + plot######################################
-##add age to the PCA scores
-df_clean <- read.csv("df_1a_clean.csv")
-df.pca.scores <- pca_scores
-df.pca.scores$age <- df_clean$age
+  # Calculate principal component scores
+  component_scores <- as.matrix(
+    X_for_scores
+  ) %*% eigenvectors
 
-# Create age groups
-df.pca.scores$age_group <- cut(df.pca.scores$age, breaks = seq(0, 100, 10))
+  # Standardized component scores used for biplot objects
+  positive_components <- eigenvalues > 0
 
-#Calculate Statistics by Age Group
-#Calculate the average PC scores for each age group
-df.pca.scores.grouped.mean <- df.pca.scores %>% 
-  group_by(age_group) %>% 
-  summarize_all(suppressWarnings(funs(mean(., na.rm = TRUE))))
+  component_scores_standardized <- sweep(
+    component_scores[
+      ,
+      positive_components,
+      drop = FALSE
+    ],
+    2,
+    sqrt(positive_eigenvalues),
+    FUN = "/"
+  )
 
-# Calculate the standard deviation of PC scores for each age group
-df.pca.scores.grouped.sd <- df.pca.scores %>% 
-  group_by(age_group) %>% 
-  summarize_all(suppressWarnings(funs(sd(., na.rm = TRUE))))
+  biplot_objects <- (
+    component_scores_standardized /
+      sqrt(nrow(component_scores) - 1)
+  )
 
-# Plot the mean and standard deviation of the PC scores in each age group
-colors <- c("red", "gold","chartreuse3","cyan","blue", "pink", "magenta",   "black",  "darkblue", "darkred", "darkgreen", "yellow")
+  # Variable scores/loadings
+  variable_scores <- cor(
+    X,
+    component_scores,
+    use = "pairwise.complete.obs"
+  )
 
-#List of PCA component names to iterate over
-pca_components <- paste0("V", 1:top_n_pca)
+  # Variable coordinates used for biplots
+  biplot_variables <- (
+    variable_scores *
+      sqrt(nrow(X) - 1)
+  )
 
-p <- ggplot()
-
-# Loop over the PCA components
-for (i in 1:top_n_pca) {
-  
-  # Extract the current PCA component
-  pca_component <- pca_components[i]
-  
-  
-  # Create a new plot for the current PCA component
-  p <- p + geom_line(data = df.pca.scores.grouped.mean, aes(x = age_group, y = !!sym(pca_component), group = i), color = colors[i], linewidth = 1.5, show.legend = TRUE) 
+  # Return PCA results
+  list(
+    Correlation.matrix = correlation_matrix,
+    Eigenvalues = eigenvalues,
+    Positive.Eigenvalues = positive_eigenvalues,
+    Positive.Eigenvalues.as.percent = positive_eigenvalues_percent,
+    Square.root.of.eigenvalues = sqrt(
+      positive_eigenvalues
+    ),
+    Eigenvectors = eigenvectors,
+    Component.scores = component_scores,
+    Variable.scores = variable_scores,
+    Biplot.objects = biplot_objects,
+    Biplot.variables = biplot_variables
+  )
 }
 
 
-# Finalize the plot with labels, title, and color scale
-p <- p + labs(x = "Age Group", y = "PCA Scores") +
-  scale_color_manual(values = colors[1:2]) +
-  theme(legend.position = "right",
-        axis.text = element_text(size = 14),
-        axis.title = element_text(size = 16),
-        plot.title = element_text(size = 18, hjust = 0.5)) +
-  ggtitle("PCA Scores by Age Group")
-filename <- paste0("pca_scores_vs_ages3.pdf")
-ggsave(filename = filename, plot = p, width = 15, height = 12)
-####This plot shows PC score vs age for the flipped PC scores and will be in the paper
+################################################################################
+# 2.2 Prepare phenotypic data for PCA
+################################################################################
+
+# Remove non-phenotypic columns before PCA.
+#
+# Using column names is safer and clearer than removing columns by position.
+exclude_cols <- c(
+  "X.1",
+  "X",
+  "age"
+)
+
+pca_input <- df_clean[
+  ,
+  !(colnames(df_clean) %in% exclude_cols),
+  drop = FALSE
+]
 
 
+################################################################################
+# 2.3 Perform PCA
+################################################################################
 
+message("Performing PCA...")
+
+pca_fit <- InDaPCA(
+  pca_input
+)
+
+# Save complete PCA object
+saveRDS(
+  pca_fit,
+  file = "pca_fit_data.rds"
+)
+
+# Extract component scores
+pca_scores <- as.data.frame(
+  pca_fit$Component.scores
+)
+
+# Assign informative component names
+colnames(pca_scores) <- paste0(
+  "PC",
+  seq_len(ncol(pca_scores))
+)
+
+
+################################################################################
+# 2.4 Calculate retrieval scores and select dimensions
+################################################################################
+
+eigenvalues <- pca_fit$Eigenvalues
+
+# Retrieval score used in the original PUMA analysis.
+#
+# NOTE:
+# This reproduces the original analysis, in which retrieval scores were
+# calculated from squared eigenvalues.
+total_variation <- sum(
+  eigenvalues^2
+)
+
+retrieval_score <- (
+  eigenvalues^2 /
+    total_variation
+)
+
+# Select components with retrieval score > 1%
+top_n_pca <- sum(
+  retrieval_score > 0.01
+)
+
+message(
+  top_n_pca,
+  " components have a retrieval score > 1%."
+)
+
+
+# Prepare data for plotting
+retrieval_score_df <- data.frame(
+  component = paste0(
+    "PC",
+    seq_len(top_n_pca)
+  ),
+  retrieval_score = retrieval_score[
+    seq_len(top_n_pca)
+  ]
+)
+
+
+# Plot retrieval scores
+p_retrieval <- ggplot(
+  retrieval_score_df,
+  aes(
+    x = component,
+    y = retrieval_score
+  )
+) +
+  geom_col() +
+  labs(
+    x = "PCA component",
+    y = "Retrieval score",
+    title = "Retrieval Scores of Selected PCA Components"
+  ) +
+  theme(
+    axis.text.x = element_text(
+      angle = 90,
+      vjust = 0.5,
+      hjust = 1,
+      size = 14
+    ),
+    axis.text = element_text(
+      size = 14
+    ),
+    axis.title = element_text(
+      size = 16
+    ),
+    plot.title = element_text(
+      size = 18,
+      hjust = 0.5
+    )
+  )
+
+
+ggsave(
+  filename = "retrieval_score_PCA_component_top_n.pdf",
+  plot = p_retrieval,
+  width = 8,
+  height = 4
+)
+
+
+################################################################################
+# 2.5 Orient component scores
+################################################################################
+
+# Orient the selected components consistently with the PUMA analysis.
+#
+# PC1-PC4 and PC6-PC7 are multiplied by -1.
+# PC5 retains its original orientation.
+
+pcs_to_flip <- setdiff(
+  seq_len(top_n_pca),
+  5
+)
+
+for (pc in pcs_to_flip) {
+
+  message(
+    "Flipping orientation of PC",
+    pc
+  )
+
+  pca_scores[
+    ,
+    pc
+  ] <- -pca_scores[
+    ,
+    pc
+  ]
+}
+
+
+################################################################################
+# 2.6 Examine component scores across age groups
+################################################################################
+
+# Add participant age
+pca_scores_with_age <- pca_scores[
+  ,
+  seq_len(top_n_pca),
+  drop = FALSE
+]
+
+pca_scores_with_age$age <- df_clean$age
+
+
+# Create 10-year age groups
+pca_scores_with_age <- pca_scores_with_age %>%
+  mutate(
+    age_group = cut(
+      age,
+      breaks = seq(
+        0,
+        100,
+        by = 10
+      ),
+      include.lowest = TRUE
+    )
+  )
+
+
+# Convert to long format
+pca_scores_long <- pca_scores_with_age %>%
+  select(
+    age_group,
+    all_of(
+      paste0(
+        "PC",
+        seq_len(top_n_pca)
+      )
+    )
+  ) %>%
+  pivot_longer(
+    cols = starts_with("PC"),
+    names_to = "component",
+    values_to = "score"
+  )
+
+
+# Calculate mean and standard deviation within each age group
+pca_scores_by_age <- pca_scores_long %>%
+  group_by(
+    component,
+    age_group
+  ) %>%
+  summarise(
+    mean_score = mean(
+      score,
+      na.rm = TRUE
+    ),
+    sd_score = sd(
+      score,
+      na.rm = TRUE
+    ),
+    .groups = "drop"
+  )
+
+
+################################################################################
+# 2.7 Plot component scores across age groups
+################################################################################
+
+p_age <- ggplot(
+  pca_scores_by_age,
+  aes(
+    x = age_group,
+    y = mean_score,
+    group = component,
+    color = component
+  )
+) +
+  geom_line(
+    linewidth = 1.5
+  ) +
+  labs(
+    x = "Age group",
+    y = "Mean PCA score",
+    color = "Component",
+    title = "PCA Scores by Age Group"
+  ) +
+  theme(
+    legend.position = "right",
+    axis.text.x = element_text(
+      angle = 45,
+      hjust = 1
+    ),
+    axis.text = element_text(
+      size = 14
+    ),
+    axis.title = element_text(
+      size = 16
+    ),
+    plot.title = element_text(
+      size = 18,
+      hjust = 0.5
+    )
+  )
+
+
+ggsave(
+  filename = "pca_scores_vs_ages.pdf",
+  plot = p_age,
+  width = 15,
+  height = 12
+)
