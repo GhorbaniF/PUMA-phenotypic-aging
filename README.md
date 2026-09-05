@@ -4,7 +4,6 @@ PUMA is an unsupervised framework for identifying multidimensional phenotypic ag
 
 The framework was developed using more than 1,000 phenotypic traits from over 150,000 participants in the Dutch Lifelines cohort and is designed to characterize heterogeneity in aging by integrating behavioral, psychological, social, physical, environmental, and biomedical phenotypes.
 
-This repository accompanies the manuscript *PUMA: Phenotypic Unsupervised Model of Aging Reveals Distinct Aging Dimensions*.
 
 ## Workflow
 
@@ -35,8 +34,8 @@ PUMA-phenotypic-aging/
 ├── 01_preprocessing/             # Data cleaning and quality control
 ├── 02_dimensionality_reduction/  # PCA and identification of aging dimensions
 ├── 03_partial_correlation/       # Phenotypic characterization of dimensions
-├── 04_composite_scores/          # Composite-score calculation and age standardization
-├── 05_disease_enrichment/        # Prospective disease enrichment analyses
+├── 04_composite_score_calculation/          # Composite-score calculation and age standardization
+├── 05_disease_enrichment_analysis/        # Prospective disease enrichment analyses
 ├── README.md
 └── LICENSE
 ```
