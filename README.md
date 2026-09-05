@@ -65,6 +65,8 @@ Before running the pipeline:
 
 ## Running the analysis
 
+## Running the analysis
+
 Run the analysis scripts sequentially from the repository root:
 
 ```bash
@@ -73,6 +75,7 @@ Rscript 02_dimensionality_reduction/02_dimensionality_reduction.R
 Rscript 03_partial_correlation/03_partial_correlation.R
 Rscript 04_composite_scores/04_composite_scores.R
 Rscript 05_disease_enrichment/05_disease_enrichment.R
+```
 
 
 ## Data availability
