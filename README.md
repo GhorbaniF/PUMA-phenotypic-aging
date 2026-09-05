@@ -98,6 +98,3 @@ Ghorbani F, et al. *PUMA: Phenotypic Unsupervised Model of Aging Reveals Distinc
 
 This repository accompanies the PUMA bioRxiv preprint. Updates may be made as the manuscript progresses through peer review.
 
-## License
-
-This project is licensed under the MIT License. See the `LICENSE` file for details.
